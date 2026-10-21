@@ -5,6 +5,7 @@
 
 #include "edgez_umac_morse_adapter.h"
 #include "edgez_morse_tx_policy.h"
+#include "edgez_rf_api.h"
 
 #include "mmhal_wlan.h"
 #include "mmdrv.h"
@@ -73,6 +74,7 @@ static atomic_uint callback_tx_status_count;
 static atomic_uint callback_tx_pause_changes;
 static atomic_uint callback_hardware_restarts;
 static atomic_uint callback_scan_completions;
+static char active_country_code[MMWLAN_COUNTRY_CODE_LEN];
 
 /* Keep Morse packet-memory diagnostics behind the vendor adapter so the
  * public EdgeZ interface does not expose mmhal symbols. */
@@ -324,6 +326,7 @@ static int edgez_morse_radio_start(void *driver_ctx, const char country_code[3],
     {
         return (int)status;
     }
+    memcpy(active_country_code, country_code, sizeof(active_country_code));
     /* Some firmware/BCF combinations leave the extended-host-table MAC at
      * zero. The platform HAL preserves a valid firmware address and otherwise
      * derives a stable locally administered address from the host device ID. */
@@ -343,6 +346,7 @@ static void edgez_morse_radio_stop(void *driver_ctx)
 {
     (void)driver_ctx;
     mmdrv_deinit();
+    memset(active_country_code, 0, sizeof(active_country_code));
     /* A stopped radio may not deliver completion callbacks for packets that
      * were still owned by the firmware.  The packet pool is reset by deinit;
      * discard the corresponding host-side tokens before the next wake cycle. */
@@ -366,11 +370,52 @@ static int edgez_morse_remove_interface(void *driver_ctx, uint16_t vif_id)
 static int edgez_morse_set_channel(void *driver_ctx,
                                    const struct edgez_umac_channel *channel)
 {
+    struct edgez_rf_regulatory_channel regulatory = { 0 };
+    enum mmwlan_status status;
     (void)driver_ctx;
-    return (int)mmdrv_set_channel(channel->operating_frequency_hz,
-                                  channel->primary_1mhz_channel_index,
-                                  channel->operating_bw_mhz,
-                                  channel->primary_bw_mhz, false);
+
+    if (!edgez_rf_resolve_regulatory_channel(
+            active_country_code, channel->operating_frequency_hz,
+            channel->operating_bw_mhz, &regulatory))
+    {
+        EDGEZ_RF_LOG_WRN("Channel %lu Hz/%u MHz is not valid for %.2s\n",
+                          (unsigned long)channel->operating_frequency_hz,
+                          channel->operating_bw_mhz, active_country_code);
+        return (int)MMWLAN_CHANNEL_INVALID;
+    }
+
+    status = mmdrv_set_channel(channel->operating_frequency_hz,
+                               channel->primary_1mhz_channel_index,
+                               channel->operating_bw_mhz,
+                               channel->primary_bw_mhz, false);
+    if (status != MMWLAN_SUCCESS)
+    {
+        return (int)status;
+    }
+
+    int32_t actual_txpower = 0;
+    status = mmdrv_set_txpower(&actual_txpower, regulatory.max_eirp_dbm);
+    if (status != MMWLAN_SUCCESS)
+    {
+        return (int)status;
+    }
+    status = mmdrv_set_duty_cycle(regulatory.duty_cycle_centi_percent,
+                                  regulatory.duty_cycle_omit_control_response,
+                                  MMWLAN_DUTY_CYCLE_MODE_SPREAD);
+    if (status != MMWLAN_SUCCESS)
+    {
+        return (int)status;
+    }
+
+    EDGEZ_RF_LOG_INF("Regulatory profile %.2s: %lu Hz/%u MHz, duty %u.%02u%%, tx EIRP requested %d dBm actual %ld dBm\n",
+                      active_country_code,
+                      (unsigned long)channel->operating_frequency_hz,
+                      channel->operating_bw_mhz,
+                      regulatory.duty_cycle_centi_percent / 100U,
+                      regulatory.duty_cycle_centi_percent % 100U,
+                      regulatory.max_eirp_dbm,
+                      (long)actual_txpower);
+    return (int)MMWLAN_SUCCESS;
 }
 
 static int edgez_morse_configure_bss(void *driver_ctx, uint16_t vif_id,
