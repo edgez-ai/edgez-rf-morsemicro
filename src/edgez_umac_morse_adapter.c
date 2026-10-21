@@ -28,7 +28,9 @@
 
 #define EDGEZ_MORSE_TX_TRACKED_MAX 16U
 #define EDGEZ_MORSE_BEACON_MAX_LEN 768U
-#define EDGEZ_MORSE_MGMT_MAX_LEN 768U
+/* The MM8108 packet pool accepts up to 1668 bytes.  Keep enough room for a
+ * normal HaLow-sized public action frame while staying below that RF boundary. */
+#define EDGEZ_MORSE_MGMT_MAX_LEN 1536U
 #define EDGEZ_MORSE_ACTION_HEADER_LEN 24U
 #define EDGEZ_MORSE_SELF_PROTECTED_CATEGORY 15U
 #define EDGEZ_MORSE_MPM_OPEN 1U
@@ -76,6 +78,13 @@ static atomic_uint callback_scan_completions;
  * public EdgeZ interface does not expose mmhal symbols. */
 extern uint32_t mmhal_wlan_pktmem_tx_free_count(void) __attribute__((weak));
 extern uint32_t mmhal_wlan_pktmem_tx_total_count(void) __attribute__((weak));
+
+static void edgez_morse_clear_tx_tracking(void)
+{
+    MMOSAL_TASK_ENTER_CRITICAL();
+    memset(tx_tracking, 0, sizeof(tx_tracking));
+    MMOSAL_TASK_EXIT_CRITICAL();
+}
 
 uint32_t edgez_rf_tx_packet_free_count(void)
 {
@@ -291,6 +300,7 @@ static uintptr_t edgez_morse_peek_tx_token(struct mmpkt *packet)
 static int edgez_morse_prepare(void *driver_ctx)
 {
     (void)driver_ctx;
+    edgez_morse_clear_tx_tracking();
     mmdrv_pre_init();
     return 0;
 }
@@ -333,6 +343,10 @@ static void edgez_morse_radio_stop(void *driver_ctx)
 {
     (void)driver_ctx;
     mmdrv_deinit();
+    /* A stopped radio may not deliver completion callbacks for packets that
+     * were still owned by the firmware.  The packet pool is reset by deinit;
+     * discard the corresponding host-side tokens before the next wake cycle. */
+    edgez_morse_clear_tx_tracking();
 }
 
 static int edgez_morse_add_mesh_interface(void *driver_ctx,
