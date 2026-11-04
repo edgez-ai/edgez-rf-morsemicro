@@ -5,6 +5,7 @@
 
 #include "edgez_umac_morse_adapter.h"
 #include "edgez_morse_tx_policy.h"
+#include "edgez_morse_rx_policy.h"
 #include "edgez_rf_api.h"
 
 #include "mmhal_wlan.h"
@@ -764,6 +765,31 @@ const struct edgez_rf_backend_ops *edgez_umac_morse_driver_ops(void)
     return edgez_rf_driver_ops();
 }
 
+static bool edgez_morse_prepare_rx(struct edgez_umac_rx_frame *frame,
+                                  const struct mmdrv_rx_metadata *metadata)
+{
+    const size_t wire_length = frame->length;
+    const bool fcs_included = (metadata->flags & MMDRV_RX_FLAG_FCS_INCLUDED) != 0U;
+    const bool receive_error =
+        (metadata->flags & (MMDRV_RX_FLAG_CRC_ERROR | MMDRV_RX_FLAG_ERROR)) != 0U;
+    size_t payload_length;
+    if (!edgez_morse_rx_payload_length(wire_length, fcs_included,
+                                       receive_error, &payload_length))
+    {
+        EDGEZ_RF_LOG_DBG("RX rejected len=%u flags=0x%02x", (unsigned)wire_length,
+                         (unsigned)metadata->flags);
+        return false;
+    }
+    frame->length = payload_length;
+    if (fcs_included)
+    {
+        EDGEZ_RF_LOG_DBG("RX FCS removed len=%u->%u flags=0x%02x",
+                         (unsigned)wire_length, (unsigned)payload_length,
+                         (unsigned)metadata->flags);
+    }
+    return true;
+}
+
 int edgez_umac_morse_dispatch_rx(struct edgez_umac *umac,
                                  struct mmpkt *packet, uint16_t driver_channel)
 {
@@ -786,6 +812,12 @@ int edgez_umac_morse_dispatch_rx(struct edgez_umac *umac,
         .vif_id = metadata->vif_id,
         .decrypted = (metadata->flags & MMDRV_RX_FLAG_DECRYPTED) != 0U,
     };
+    if (!edgez_morse_prepare_rx(&frame, metadata))
+    {
+        mmpkt_close(&view);
+        mmpkt_release(packet);
+        return EDGEZ_UMAC_INVALID_ARGUMENT;
+    }
     const uint16_t frame_control = frame.length >= 2U ?
         edgez_morse_get_le16(frame.data) : 0U;
     const bool normalized = edgez_umac_morse_normalize_rx(&frame);
@@ -824,6 +856,11 @@ static int edgez_umac_morse_observe_rx(struct edgez_umac *umac,
         .vif_id = metadata->vif_id,
         .decrypted = (metadata->flags & MMDRV_RX_FLAG_DECRYPTED) != 0U,
     };
+    if (!edgez_morse_prepare_rx(&frame, metadata))
+    {
+        mmpkt_close(&view);
+        return EDGEZ_UMAC_INVALID_ARGUMENT;
+    }
     (void)edgez_umac_morse_normalize_rx(&frame);
     int result = edgez_umac_dispatch_rx_frame(umac, &frame);
     mmpkt_close(&view);
