@@ -66,3 +66,21 @@ statistics temporarily wakes the host transport. Counters and state flags
 are protocol diagnostics, not measurements of RF sleep power.
 The portable mesh core continues to use only vendor-neutral RF interfaces;
 this backend-specific helper is for platform diagnostics.
+
+## On-demand MAC diagnostics
+
+`edgez_morse_diagnostics.h` exposes `edgez_morse_read_mac_diagnostics()`.
+Call it from an application task with the radio running, using caller-owned
+storage of at least `EDGEZ_MORSE_MAC_DIAGNOSTICS_CAPACITY` bytes. It returns
+one bounded, validated MAC statistics command response, including the native
+header/status, for offline decoding against matching firmware metadata.
+Zero means success; positive values are native driver errors; negative values
+indicate invalid arguments or a malformed response. Always check the result
+before interpreting the response as statistics.
+
+The helper installs no timer and does not reset counters, transmit a test
+frame, or change the station, power-save or TWT configuration. Reading the
+statistics temporarily wakes the host transport. Counters and state flags
+are protocol diagnostics, not measurements of RF sleep power.
+The portable mesh core continues to use only vendor-neutral RF interfaces;
+this backend-specific helper is for platform diagnostics.
