@@ -15,6 +15,7 @@ option(EDGEZ_RF_MORSEMICRO_BUILD_TESTS "Build host-side policy tests" OFF)
 # the vendor-neutral EdgeZ UMAC headers and Morse Micro's mmdrv headers.
 if(EDGEZ_RF_MORSEMICRO_BUILD_LIBRARY)
     add_library(edgez_rf_morsemicro STATIC
+        src/edgez_morse_diagnostics.c
         src/edgez_mesh_ccm_morse.c
         src/edgez_morse_channel.c
         src/edgez_umac_morse_adapter.c

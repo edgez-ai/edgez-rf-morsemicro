@@ -10,6 +10,7 @@ set(EDGEZ_RF_MORSEMICRO_INCLUDE_DIRS
 
 # Adapter between edgez_rf_backend.h and Morse Micro's mmdrv API.
 set(EDGEZ_RF_MORSEMICRO_ADAPTER_SOURCES
+    "${_EDGEZ_RF_MORSEMICRO_ROOT}/src/edgez_morse_diagnostics.c"
     "${_EDGEZ_RF_MORSEMICRO_ROOT}/src/edgez_mesh_ccm_morse.c"
     "${_EDGEZ_RF_MORSEMICRO_ROOT}/src/edgez_morse_channel.c"
     "${_EDGEZ_RF_MORSEMICRO_ROOT}/src/edgez_umac_morse_adapter.c"
